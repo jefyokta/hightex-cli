@@ -16,7 +16,7 @@ export abstract class Platform {
     }
     abstract install(api?:PromptApi): Promise<void>;
 
-    abstract update(): Promise<void>;
+    abstract update(api?:PromptApi): Promise<void>;
 
     abstract uninstall(): Promise<void>;
 
@@ -29,4 +29,22 @@ export abstract class Platform {
     abstract getLatestVersion(): Promise<string>;
 
     abstract getExecutablePath(): Promise<string | null>;
+
+
+    async create(props:PromptApi){
+        const path = process.cwd();
+        const title = await props.text("Project Title?",{
+            placeholder:"Rancang Bangun Sistem Informasi ABC"
+        })
+        console.log(title)
+
+        const categories = (await fetch("https://hightex.jefyokta.dev/api/categories").then(r=>r.json())).data;
+        if(!Array.isArray(categories) || categories.length === 0){
+            throw new Error("Categories not found!");
+        }
+        const category = await props.select("Document Category?",{
+            options:categories.map(c=>({label:`${c.name} (${c.variant})`,value:c}))
+        })
+    }
+    async compile(props:PromptApi){}
 }

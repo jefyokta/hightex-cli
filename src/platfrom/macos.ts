@@ -35,6 +35,7 @@ export class MacOS extends Platform {
 
     async install(api:PromptApi): Promise<void> {
         if (await this.isInstalled()) {
+            api.cancel("HighTex already installed")
             return;
         }
 
@@ -47,15 +48,31 @@ export class MacOS extends Platform {
         }
     }
 
-    async update(): Promise<void> {
-        if (!(await this.isInstalled())) {
-            throw new ExecutableNotFound();
+    async update(api: PromptApi): Promise<void> {
+    if (!(await this.isInstalled())) {
+        throw new ExecutableNotFound();
+    }
+
+    const spinner = api.spinner("HighTex Updater...");
+    spinner.start();
+
+    try {
+        spinner.update("Checking for updates...");
+
+        const installedVersion = await this.getInstalledVersion();
+        const release = await this.fetchLatestRelease();
+        const latestVersion = release.tag_name.replace(/^v/, "");
+
+        if (installedVersion === latestVersion) {
+            spinner.stop("HighTex is already up to date.");
+            return;
         }
 
-        const release = await this.fetchLatestRelease();
+        spinner.update(`Updating HighTex ${installedVersion ?? "unknown"} → ${latestVersion}...`);
 
         const asset = release.assets.find(
             ({ name }) =>
+                name.startsWith("HighTex") &&
                 name.endsWith(".zip") &&
                 /macos|darwin/i.test(name),
         );
@@ -66,6 +83,8 @@ export class MacOS extends Platform {
             );
         }
 
+        spinner.update("Downloading update...");
+
         const response = await fetch(asset.browser_download_url);
 
         if (!response.ok) {
@@ -74,10 +93,7 @@ export class MacOS extends Platform {
             );
         }
 
-        const tempPath = join(
-            tmpdir(),
-            `hightex-${crypto.randomUUID()}`,
-        );
+        const tempPath = join(tmpdir(), `hightex-${crypto.randomUUID()}`);
         const archivePath = join(tempPath, "HighTex.zip");
         const extractPath = join(tempPath, "extracted");
 
@@ -85,25 +101,23 @@ export class MacOS extends Platform {
 
         try {
             await Bun.write(archivePath, response);
+
+            spinner.update("Extracting update...");
             await $`ditto -x -k ${archivePath} ${extractPath}`;
 
             const extractedApp = this.findApp(extractPath);
 
             if (!extractedApp) {
-                throw new Error(
-                    "HighTex.app was not found in the ZIP archive.",
-                );
+                throw new Error("HighTex.app was not found in the ZIP archive.");
             }
+
+            spinner.update("Replacing application...");
 
             await $`osascript -e ${'tell application "HighTex" to quit'}`
                 .nothrow()
                 .quiet();
 
-            rmSync(this.appPath, {
-                recursive: true,
-                force: true,
-            });
-
+            rmSync(this.appPath, { recursive: true, force: true });
             await $`ditto ${extractedApp} ${this.appPath}`;
 
             this.storage.set({
@@ -115,13 +129,15 @@ export class MacOS extends Platform {
                 ),
             });
         } finally {
-            rmSync(tempPath, {
-                recursive: true,
-                force: true,
-            });
+            rmSync(tempPath, { recursive: true, force: true });
         }
-    }
 
+        spinner.stop(`HighTex updated to ${latestVersion}.`);
+    } catch (error) {
+        spinner.stop("Failed to update HighTex.");
+        throw error;
+    }
+}
     async uninstall(): Promise<void> {
         if (!existsSync(this.appPath)) {
             return;
